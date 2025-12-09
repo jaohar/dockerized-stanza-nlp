@@ -6,6 +6,10 @@ import json
 import os
 from stanza.resources.common import DEFAULT_MODEL_DIR
 
+# Use pre-downloaded model path
+DEFAULT_MODEL_DIR = os.environ.get('STANZA_RESOURCES_DIR', DEFAULT_MODEL_DIR)
+
+
 def verify_inputs(data):
     language = data.get('language')
     text = data.get('text')
@@ -48,8 +52,6 @@ def get_pipeline(language, processors):
 
 
 def parse_doc(doc):
-    print("Parsing doc...")
-    print(doc)
     serializable_entities = [
         {
             "text": entity.text,
@@ -65,7 +67,12 @@ def parse_doc(doc):
         tokens = []
         deps = []
         for word in sentence.words:
-            # print(word)
+            # Build governorGloss safely
+            if word.head is not None and word.head > 0:
+                governorGloss = sentence.words[word.head - 1].text
+            else:
+                governorGloss = None
+
             tokens.append({
                 'index': word.id,
                 'token': word.text,
@@ -76,11 +83,13 @@ def parse_doc(doc):
                 'start_char': word.start_char,
                 'end_char': word.end_char,
             })
+
             deps.append({
                 'dep': word.deprel,
                 'governor': word.head,
-                'governorGloss': sentence.words[word.head-1].text,
-                'dependent': word.id, 'dependentGloss': word.text
+                'governorGloss': governorGloss,
+                'dependent': word.id,
+                'dependentGloss': word.text
             })
 
         annotated_sentences.append({'basicDependencies': deps, 'tokens': tokens})
@@ -88,6 +97,7 @@ def parse_doc(doc):
             annotated_sentences[-1]['parse'] = str(sentence.constituency)
 
     return annotated_sentences, serializable_entities
+
 
 
 app = Flask(__name__, static_url_path='', static_folder=os.path.abspath(os.path.dirname(__file__)))
@@ -106,7 +116,7 @@ def get_data():
             verify_inputs(data)
         except ValueError as error:
             print(f"Error: {error}")
-            return jsonify({"error": "Input Validation Error", "err": e}), 500
+            return jsonify({"error": "Internal Server Error","err": str(e)}), 500
 
         language = data['language']  
         stringnlp = data['text']

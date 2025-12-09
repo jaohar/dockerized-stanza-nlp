@@ -1,49 +1,39 @@
-# Use an official Python runtime as a parent image
-FROM python:3.8
+# Use Python 3.11 slim base image
+FROM python:3.11-slim
 
-# Set the working directory to /app
-WORKDIR /app
+# Set working directory
+WORKDIR /app/stanza
 
-# Install any needed packages specified in requirements.txt
+# Install system dependencies
 RUN apt-get update && \
-    apt-get install -y  \
-    --no-install-recommends \
+    apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     wget \
     git \
     vim \
-    libev-dev \ 
+    libev-dev \
     ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip and install Python packages
+RUN pip install --upgrade pip setuptools wheel
 
+# Install Stanza and Python dependencies
+RUN git clone https://github.com/stanfordnlp/stanza.git /tmp/stanza && \
+    pip install -e /tmp/stanza Flask bjoern gunicorn
 
-RUN pip install --upgrade pip
-
-RUN git clone https://github.com/stanfordnlp/stanza.git
-WORKDIR /app/stanza
-
-RUN pip install -e .
-
-RUN pip install Flask bjoern 
-# RUN pip install gunicorn asyncio aiohttp 
-
-# Copy the current directory contents into the container at /app/stanza
-WORKDIR /app/stanza
-
-EXPOSE 5000
-
+# Copy your application code into the container
 COPY . /app/stanza
 
-# Run script.py when the container launches
-# CMD ["/usr/local/bin/gunicorn","-w","1","-b","0.0.0.0:5000","--timeout","0", "-k", "sync","script:app"]
+# Pre-download English model into container so it starts immediately
+RUN python -c "import stanza; stanza.download('en', model_dir='/app/stanza_resources')"
 
-CMD ["python", "script.py"]
+# Expose the port your API will run on
+EXPOSE 5000
 
+# Environment variable so your script uses the pre-downloaded models
+ENV STANZA_RESOURCES_DIR=/app/stanza_resources
 
-# CMD ["/usr/local/bin/gunicorn", \
-#      "-b", "0.0.0.0:5000", \
-#      "--timeout", "0", \
-#      "-k", "sync", \
-#      "script:app"]
+# Start the service using Gunicorn
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "--timeout", "0", "-k", "sync", "script:app"]
