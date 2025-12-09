@@ -20,8 +20,7 @@ RUN pip install --upgrade pip setuptools wheel
 COPY . /app
 
 # Install Python dependencies
-RUN pip install -e ./stanza
-RUN pip install Flask bjoern gunicorn
+RUN pip install Flask bjoern gunicorn stanza
 
 # Pre-download English model
 RUN python -c "import stanza; stanza.download('en', model_dir='/app/stanza_resources')"
