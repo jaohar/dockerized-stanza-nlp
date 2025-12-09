@@ -1,62 +1,56 @@
-import os
-import logging
 from flask import Flask, request, jsonify
 import bjoern
 import stanza
+import logging
+import json
+import os
 from stanza.resources.common import DEFAULT_MODEL_DIR
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Use pre-downloaded model path from environment variable
+# Use pre-downloaded model path
 DEFAULT_MODEL_DIR = os.environ.get('STANZA_RESOURCES_DIR', DEFAULT_MODEL_DIR)
-os.makedirs(DEFAULT_MODEL_DIR, exist_ok=True)
-
-# Pipeline cache to avoid rebuilding pipelines
-pipelines_cache = dict()
-
 
 def verify_inputs(data):
-    """Ensure language, text, and processors are strings."""
     language = data.get('language')
     text = data.get('text')
     processors = data.get('processors')
 
     if not all(isinstance(value, str) for value in [language, text, processors]):
-        raise ValueError("All inputs must be strings")
+        raise ValueError('All inputs must be strings')
 
     return True
 
 
-def ensure_stanza(language: str):
-    """Download language model if not present."""
-    model_path = os.path.join(DEFAULT_MODEL_DIR, language)
-    if not os.path.exists(model_path):
-        logger.info(f"Downloading Stanza model for '{language}'...")
+os.makedirs(DEFAULT_MODEL_DIR, exist_ok=True)
+# print(f"Stanza model directory: {DEFAULT_MODEL_DIR}")
+
+# print(f"Initiating pipeline cache...")
+pipelinesCache = dict()
+
+def ensure_stanza(language):
+    if not os.path.exists(os.path.join(DEFAULT_MODEL_DIR, language)):
+        print(f"Downloading Stanza model for '{language}'...")
         stanza.download(language, model_dir=DEFAULT_MODEL_DIR)
     else:
-        logger.info(f"Stanza model for '{language}' already exists. Skipping download.")
+        print(f"Stanza model for '{language}' already exists. Skipping download.")
 
+def get_pipeline(language, processors):
+    global pipelinesCache
+    cacheKey = language + "_" + processors
 
-def get_pipeline(language: str, processors: str):
-    """Get or build Stanza pipeline."""
-    cache_key = f"{language}_{processors}"
     ensure_stanza(language)
 
-    if cache_key not in pipelines_cache:
-        logger.info(f"cacheKey: {cache_key} NOT FOUND! Building pipeline.")
-        pipelines_cache[cache_key] = stanza.Pipeline(
+    if cacheKey not in pipelinesCache:
+        print(f"cacheKey: {cacheKey} NOT FOUND! building")
+        pipelinesCache[cacheKey] = stanza.Pipeline(
             lang=language,
             processors=processors,
             use_gpu=False
         )
 
-    return pipelines_cache[cache_key]
+    return pipelinesCache[cacheKey]
 
 
 def parse_doc(doc):
-    """Convert Stanza Doc object to serializable structure."""
     serializable_entities = [
         {
             "text": entity.text,
@@ -72,7 +66,11 @@ def parse_doc(doc):
         tokens = []
         deps = []
         for word in sentence.words:
-            governorGloss = sentence.words[word.head - 1].text if word.head is not None and word.head > 0 else None
+            # Build governorGloss safely
+            if word.head is not None and word.head > 0:
+                governorGloss = sentence.words[word.head - 1].text
+            else:
+                governorGloss = None
 
             tokens.append({
                 'index': word.id,
@@ -94,50 +92,48 @@ def parse_doc(doc):
             })
 
         annotated_sentences.append({'basicDependencies': deps, 'tokens': tokens})
-
         if hasattr(sentence, 'constituency') and sentence.constituency is not None:
             annotated_sentences[-1]['parse'] = str(sentence.constituency)
 
     return annotated_sentences, serializable_entities
 
 
-# Flask app
-app = Flask(__name__, static_url_path='', static_folder=os.path.abspath(os.path.dirname(__file__)))
 
+app = Flask(__name__, static_url_path='', static_folder=os.path.abspath(os.path.dirname(__file__)))
 
 @app.route('/ping', methods=['GET'])
 def ping():
-    """Health check."""
     return jsonify({"message": "Service is alive"})
 
-
 @app.route('/nlp', methods=['POST'])
-def nlp_endpoint():
-    """Process NLP request."""
+def get_data():
     try:
-        data = request.get_json()
-        verify_inputs(data)
+        data = request.get_json() 
+        # print(f"request data: {data}")
 
-        language = data['language']
-        text = data['text']
+        try:
+            verify_inputs(data)
+        except ValueError as error:
+            print(f"Error: {error}")
+            return jsonify({"error": "Internal Server Error","err": str(e)}), 500
+
+        language = data['language']  
+        stringnlp = data['text']
         processors = data['processors']
 
         pipeline = get_pipeline(language, processors)
-        doc = pipeline(text)
+        doc = pipeline(stringnlp)
 
-        sentences, entities = parse_doc(doc)
-        return jsonify({'sentences': sentences, 'entities': entities})
+        annotated_sentences, serializable_entities = parse_doc(doc)
 
-    except ValueError as ve:
-        logger.warning(f"Input validation error: {ve}")
-        return jsonify({"error": "Input Validation Error", "err": str(ve)}), 400
+        return json.dumps({
+            'sentences': annotated_sentences,
+            'entities': serializable_entities
+        })
 
     except Exception as e:
-        logger.exception("Unexpected error processing request")
-        return jsonify({"error": "Internal Server Error", "err": str(e)}), 500
-
+        print(e)
+        return jsonify({"error": "Internal Server Error","err":e}), 500
 
 if __name__ == '__main__':
-    # For Render free tier, you can use Gunicorn externally.
-    # For local testing, bjoern is fine:
     bjoern.run(app, "0.0.0.0", 5000)
