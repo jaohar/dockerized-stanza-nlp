@@ -1,8 +1,6 @@
-# Use Python 3.11 slim base image
 FROM python:3.11-slim
 
-# Set working directory
-WORKDIR /app/stanza
+WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && \
@@ -11,29 +9,28 @@ RUN apt-get update && \
     cmake \
     wget \
     git \
-    vim \
     libev-dev \
     ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install Python packages
+# Upgrade pip
 RUN pip install --upgrade pip setuptools wheel
+
+# Copy your code first
+COPY . /app
 
 # Install Python dependencies
 RUN pip install -e ./stanza
 RUN pip install Flask bjoern gunicorn
 
-# Copy your application code into the container
-COPY . /app/stanza
-
-# Pre-download English model into container so it starts immediately
+# Pre-download English model
 RUN python -c "import stanza; stanza.download('en', model_dir='/app/stanza_resources')"
 
-# Expose the port your API will run on
-EXPOSE 5000
-
-# Environment variable so your script uses the pre-downloaded models
+# Environment variable so script uses pre-downloaded models
 ENV STANZA_RESOURCES_DIR=/app/stanza_resources
 
-# Start the service using Gunicorn
+# Expose API port
+EXPOSE 5000
+
+# Run Gunicorn
 CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5000", "--timeout", "0", "-k", "sync", "script:app"]
