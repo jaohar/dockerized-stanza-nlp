@@ -19,9 +19,9 @@ RUN apt-get update && \
 # Upgrade pip and install Python packages
 RUN pip install --upgrade pip setuptools wheel
 
-# Install Stanza and Python dependencies
-RUN git clone https://github.com/stanfordnlp/stanza.git /tmp/stanza && \
-    pip install -e /tmp/stanza Flask bjoern gunicorn
+# Install Python dependencies
+RUN pip install -e ./stanza
+RUN pip install Flask bjoern gunicorn
 
 # Copy your application code into the container
 COPY . /app/stanza
